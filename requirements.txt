@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+databases
+
+# база данных
+sqlalchemy
+databases
+
+# .env
+python-dotenv
