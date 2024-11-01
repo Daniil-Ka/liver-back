@@ -9,3 +9,5 @@ databases
 
 # .env
 python-dotenv
+
+passlib
