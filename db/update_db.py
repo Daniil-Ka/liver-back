@@ -1,5 +1,5 @@
 # init_db.py
-from database import engine, Base
+from db.database import engine, Base
 
 
 def update_database():
