@@ -11,3 +11,5 @@ databases
 python-dotenv
 
 passlib
+pillow
+python-multipart
