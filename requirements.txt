@@ -13,3 +13,10 @@ python-dotenv
 passlib
 pillow
 python-multipart
+
+onnxruntime
+opencv-python
+numpy
+
+# webrtc
+websockets

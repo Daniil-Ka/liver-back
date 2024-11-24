@@ -3,6 +3,8 @@ from fastapi.responses import StreamingResponse
 from PIL import Image, ImageOps
 import io
 
+from starlette.websockets import WebSocket
+
 upload_router = APIRouter()
 
 
@@ -33,3 +35,24 @@ async def upload_photo(file: UploadFile = File(...)):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка при обработке изображения: {str(e)}")
+
+@upload_router.websocket('/ws')
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    print("Клиент подключился.")
+    try:
+        while True:
+            # Принимаем кадр (в формате Base64)
+            data = await websocket.receive_text()
+
+            # Сохраняем кадр (опционально)
+            frame_path = 'dir_test' / f"frame_{websocket.client}.jpg"
+            with open(frame_path, "wb") as f:
+                f.write(data.split(",")[1].encode("utf-8"))
+
+            print(f"Кадр от клиента {websocket.client}: {frame_path}")
+
+    except Exception as e:
+        print("Ошибка WebSocket:", e)
+    finally:
+        print("Клиент отключился.")
