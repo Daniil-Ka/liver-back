@@ -14,9 +14,11 @@ passlib
 pillow
 python-multipart
 
+dicom2jpg
 onnxruntime
 opencv-python
-numpy
+numpy<2.0.0
+ultralytics
 
 # webrtc
 websockets
