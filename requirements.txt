@@ -17,8 +17,9 @@ python-multipart
 dicom2jpg
 onnxruntime
 opencv-python
-numpy<2.0.0
+numpy
 ultralytics
 
 # webrtc
 websockets
+starlette
