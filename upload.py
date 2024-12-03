@@ -35,7 +35,7 @@ async def upload_file(file: UploadFile = File(...)):
 def process_dicom(file_content: bytes):
     """
     Обрабатывает DICOM-файлы напрямую из байтового содержимого,
-    использует модель для анализа и возвращает обработанное изображение с масками объектов.
+    использует модель для анализа и возвращает обработанное изображение с цветными масками.
     """
     try:
         dicom_io = io.BytesIO(file_content)
@@ -54,34 +54,37 @@ def process_dicom(file_content: bytes):
         img_data = (img_data - np.min(img_data)) / (np.max(img_data) - np.min(img_data)) * 255
         img_data = img_data.astype(np.uint8)
 
-        # Преобразуем 2D массив в PIL Image
-        image = Image.fromarray(img_data)
+        # Преобразуем 2D массив в PIL Image (градации серого)
+        base_image = Image.fromarray(img_data).convert("L")
 
         # Масштабируем изображение до 640x640
-        image = ImageOps.fit(image, (640, 640), Image.Resampling.LANCZOS)
+        base_image = ImageOps.fit(base_image, (640, 640), Image.Resampling.LANCZOS)
 
-        # Конвертируем изображение обратно в numpy.ndarray (RGB)
-        img_data_rgb = np.array(image.convert("RGB"))
+        # Создаём RGBA-изображение для наложения цветной маски
+        overlay_image = base_image.convert("RGBA")
 
         # Прогон изображения через модель YOLO
+        img_data_rgb = np.array(base_image.convert("RGB"))
         results = model.predict(img_data_rgb)
 
-        # Создаём объект для рисования масок на изображении
-        draw = ImageDraw.Draw(image)
-
-        # Обработка масок
+        # Наложение масок
         if results[0].masks is not None:  # Проверяем наличие масок
             masks = results[0].masks.data.cpu().numpy()  # Маски (numpy array)
             for mask in masks:
                 # Преобразуем каждую маску в бинарный массив
                 mask_image = Image.fromarray((mask * 255).astype(np.uint8))
 
-                # Наносим полупрозрачную маску на изображение
-                image.paste(Image.new("RGBA", image.size, (255, 0, 0, 100)), mask=mask_image)
+                # Создаём полупрозрачный слой с цветной маской
+                color = (255, 155, 0, 50)
+                colored_mask = Image.new("RGBA", overlay_image.size, color)
+                overlay_image = Image.alpha_composite(overlay_image, Image.composite(colored_mask, overlay_image, mask_image))
+
+        # Конвертируем обратно в RGB для сохранения
+        final_image = overlay_image.convert("RGB")
 
         # Сохраняем обработанное изображение в поток
         image_io = io.BytesIO()
-        image.save(image_io, format="JPEG")
+        final_image.save(image_io, format="JPEG")
         image_io.seek(0)
 
         return StreamingResponse(
