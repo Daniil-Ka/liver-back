@@ -75,7 +75,7 @@ def process_dicom(file_content: bytes):
                 mask_image = Image.fromarray((mask * 255).astype(np.uint8))
 
                 # Создаём полупрозрачный слой с цветной маской
-                color = (255, 155, 0, 50)
+                color = (0, 0, 0, 255)
                 colored_mask = Image.new("RGBA", overlay_image.size, color)
                 overlay_image = Image.alpha_composite(overlay_image, Image.composite(colored_mask, overlay_image, mask_image))
 
