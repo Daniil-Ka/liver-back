@@ -71,13 +71,9 @@ def process_dicom(file_content: bytes):
         if results[0].masks is not None:  # Проверяем наличие масок
             masks = results[0].masks.data.cpu().numpy()  # Маски (numpy array)
             for mask in masks:
-                # Преобразуем каждую маску в бинарный массив
                 mask_image = Image.fromarray((mask * 255).astype(np.uint8))
-
-                # Создаём полупрозрачный слой с цветной маской
-                color = (0, 0, 0, 255)
-                colored_mask = Image.new("RGBA", overlay_image.size, color)
-                overlay_image = Image.alpha_composite(overlay_image, Image.composite(colored_mask, overlay_image, mask_image))
+                # Сохраняем маску в альфа-канале
+                overlay_image.putalpha(mask_image)
 
         # Конвертируем обратно в RGB для сохранения
         final_image = overlay_image.convert("RGB")
