@@ -2,7 +2,7 @@ import base64
 from pathlib import Path
 
 import numpy as np
-from PIL import ImageDraw, ImageOps
+from PIL import ImageDraw, ImageOps, ImageChops
 from fastapi import APIRouter
 from starlette.websockets import WebSocket
 from fastapi import APIRouter, File, UploadFile, HTTPException
@@ -70,23 +70,28 @@ def process_dicom(file_content: bytes):
         # Наложение масок
         if results[0].masks is not None:  # Проверяем наличие масок
             masks = results[0].masks.data.cpu().numpy()  # Маски (numpy array)
+            # Создаем пустую маску (изначально все черное, прозрачное)
+            combined_mask = Image.new("L", overlay_image.size, 0)
+
             for mask in masks:
                 mask_image = Image.fromarray((mask * 255).astype(np.uint8))
-                # Сохраняем маску в альфа-канале
-                overlay_image.putalpha(mask_image)
+
+                # Объединяем текущую маску с общей маской
+                combined_mask = ImageChops.lighter(combined_mask, mask_image)
+            overlay_image.putalpha(combined_mask)
 
         # Конвертируем обратно в RGB для сохранения
-        final_image = overlay_image.convert("RGB")
+        final_image = overlay_image.convert("RGBA")
 
         # Сохраняем обработанное изображение в поток
         image_io = io.BytesIO()
-        final_image.save(image_io, format="JPEG")
+        final_image.save(image_io, format="PNG")
         image_io.seek(0)
 
         return StreamingResponse(
             image_io,
-            media_type="image/jpeg",
-            headers={"Content-Disposition": "inline; filename=processed_dicom.jpg"}
+            media_type="image/png",
+            headers={"Content-Disposition": "inline; filename=processed_dicom.png"}
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка при обработке DICOM-файла: {str(e)}")
