@@ -74,11 +74,13 @@ def process_dicom(file_content: bytes):
             combined_mask = Image.new("L", overlay_image.size, 0)
 
             for mask in masks:
-                mask_image = Image.fromarray((mask * 255).astype(np.uint8))
+                mask_image = Image.fromarray((mask + 254).astype(np.uint8))
 
                 # Объединяем текущую маску с общей маской
                 combined_mask = ImageChops.lighter(combined_mask, mask_image)
             overlay_image.putalpha(combined_mask)
+        else:
+            overlay_image.putalpha(254)
 
         # Конвертируем обратно в RGB для сохранения
         final_image = overlay_image.convert("RGBA")
