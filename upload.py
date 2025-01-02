@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 from PIL import ImageDraw, ImageOps, ImageChops
 from fastapi import APIRouter
-from starlette.websockets import WebSocket
+from starlette.websockets import WebSocket, WebSocketDisconnect
 from fastapi import APIRouter, File, UploadFile, HTTPException
 from fastapi.responses import StreamingResponse
 import io
@@ -101,26 +101,45 @@ def process_dicom(file_content: bytes):
 
 def process_image(file_content: bytes):
     """
-    Обрабатывает изображения.
+    Обрабатывает обычные изображения, использует модель для анализа и возвращает обработанное изображение с цветными масками.
     """
     try:
         # Открываем изображение
         image = Image.open(io.BytesIO(file_content)).convert("RGB")
 
-        # Прогон через модель
-        results = model.predict(np.array(image))
+        # Масштабируем изображение до 640x640
+        base_image = ImageOps.fit(image, (640, 640), Image.Resampling.LANCZOS)
 
-        # Нанесение результатов на изображение
-        draw = ImageDraw.Draw(image)
-        for box in results[0].boxes.data:
-            x1, y1, x2, y2, conf, cls = box.tolist()
-            label = f"{model.names[int(cls)]} {conf:.2f}"
-            draw.rectangle([x1, y1, x2, y2], outline="blue", width=2)
-            draw.text((x1, y1), label, fill="blue")
+        # Прогон изображения через модель
+        img_data_rgb = np.array(base_image)
+        results = model.predict(img_data_rgb)  # Предсказание от модели
 
-        # Возвращаем обработанное изображение
+        # Создаем RGBA изображение для наложения маски
+        overlay_image = base_image.convert("RGBA")
+
+        # Наложение масок
+        if results[0].masks is not None:  # Проверяем наличие масок
+            masks = results[0].masks.data.cpu().numpy()  # Маски (numpy array)
+            # Создаем пустую маску (изначально все черное, прозрачное)
+            combined_mask = Image.new("L", overlay_image.size, 0)
+
+            for mask in masks:
+                mask_image = Image.fromarray((mask + 254).astype(np.uint8))
+
+                # Объединяем текущую маску с общей маской
+                combined_mask = ImageChops.lighter(combined_mask, mask_image)
+
+            # Применяем комбинированную маску к изображению
+            overlay_image.putalpha(combined_mask)
+        else:
+            overlay_image.putalpha(254)  # Полностью прозрачный фон
+
+        # Конвертируем обратно в RGB для сохранения
+        final_image = overlay_image.convert("RGBA")
+
+        # Сохраняем обработанное изображение в поток
         image_io = io.BytesIO()
-        image.save(image_io, format="PNG")
+        final_image.save(image_io, format="PNG")
         image_io.seek(0)
 
         return StreamingResponse(
@@ -132,10 +151,11 @@ def process_image(file_content: bytes):
         raise HTTPException(status_code=500, detail=f"Ошибка при обработке изображения: {str(e)}")
 
 
+
 @upload_router.websocket('/ws')
 async def websocket_endpoint(websocket: WebSocket):
     """
-    Обрабатывает данные через WebSocket (Base64 или DICOM).
+    Обрабатывает изображения через WebSocket.
     """
     await websocket.accept()
     print("Клиент подключился.")
@@ -153,21 +173,65 @@ async def websocket_endpoint(websocket: WebSocket):
             # Декодируем данные
             binary_data = base64.b64decode(base64_data)
 
-            # Проверяем, является ли это DICOM
-            if binary_data.startswith(b"\x44\x49\x43\x4D"):  # Проверка на "DICM"
-                response = process_dicom(binary_data)
-            else:
-                response = process_image(binary_data)
+            try:
+                # Открываем изображение
+                image = Image.open(io.BytesIO(binary_data)).convert("RGB")
 
-            # Сохраняем файл для отладки (опционально)
-            SAVE_DIR = Path("dir_test")
-            SAVE_DIR.mkdir(exist_ok=True)
-            save_path = SAVE_DIR / "frame.jpg"
-            with open(save_path, "wb") as f:
-                f.write(binary_data)
+                # Масштабируем изображение до 640x640
+                base_image = ImageOps.fit(image, (640, 640), Image.Resampling.LANCZOS)
 
-            print(f"Файл обработан и сохранён: {save_path}")
+                # Прогон изображения через модель (если нужно)
+                img_data_rgb = np.array(base_image)
+                results = model.predict(img_data_rgb)  # Предсказание от модели
+
+                # Создаем RGBA изображение для наложения маски
+                overlay_image = base_image.convert("RGBA")
+
+                # Наложение масок
+                if results[0].masks is not None:  # Проверяем наличие масок
+                    masks = results[0].masks.data.cpu().numpy()  # Маски (numpy array)
+                    # Создаем пустую маску (изначально все черное, прозрачное)
+                    combined_mask = Image.new("L", overlay_image.size, 0)
+
+                    for mask in masks:
+                        mask_image = Image.fromarray((mask + 254).astype(np.uint8))
+
+                        # Объединяем текущую маску с общей маской
+                        combined_mask = ImageChops.lighter(combined_mask, mask_image)
+
+                    # Применяем комбинированную маску к изображению
+                    overlay_image.putalpha(combined_mask)
+                else:
+                    overlay_image.putalpha(254)  # Полностью прозрачный фон
+
+                # Конвертируем обратно в RGB для сохранения
+                final_image = overlay_image.convert("RGBA")
+
+                # Сохраняем обработанное изображение в поток
+                image_io = io.BytesIO()
+                final_image.save(image_io, format="PNG")
+                image_io.seek(0)
+
+                # Отправляем обработанное изображение через WebSocket
+                await websocket.send_bytes(image_io.getvalue())
+
+                # Сохраняем файл для отладки (опционально)
+                SAVE_DIR = Path("dir_test")
+                SAVE_DIR.mkdir(exist_ok=True)
+                save_path = SAVE_DIR / "frame.png"
+                with open(save_path, "wb") as f:
+                    f.write(binary_data)
+                save_path = SAVE_DIR / "frame2.png"
+                final_image.save(save_path)
+
+                print(f"Файл обработан и сохранён: {save_path}")
+
+            except Exception as e:
+                print(f"Ошибка обработки изображения: {e}")
+                await websocket.send_text("Ошибка обработки изображения")
+
+    except WebSocketDisconnect:
+        print("Клиент отключился.")
     except Exception as e:
         print("Ошибка WebSocket:", e)
-    finally:
-        print("Клиент отключился.")
+        await websocket.close()

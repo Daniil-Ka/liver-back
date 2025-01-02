@@ -1,8 +1,6 @@
-# main.py
 import uvicorn
 from fastapi import FastAPI, Depends, HTTPException, status
 from starlette.middleware.cors import CORSMiddleware
-# from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 import schemas
@@ -18,9 +16,6 @@ update_database()
 app = FastAPI()
 
 # Настройки CORS
-# origins = [
-#    "http://localhost:5174",  # URL фронтенд-приложения
-# ]
 app.add_middleware(
     CORSMiddleware,  # type: ignore
     allow_origins=["*"],
