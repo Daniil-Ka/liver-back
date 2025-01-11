@@ -1,6 +1,6 @@
 import base64
 from pathlib import Path
-
+import requests
 import numpy as np
 from PIL import ImageDraw, ImageOps, ImageChops
 from fastapi import APIRouter
@@ -30,6 +30,52 @@ async def upload_file(file: UploadFile = File(...)):
             return process_image(file_content)  # Обработка изображения (JPEG/PNG)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка обработки файла: {str(e)}")
+
+
+@upload_router.post("/edited-images/")
+async def upload_images(
+    files: List[UploadFile] = File(...),
+):
+    # Проверяем, что прислали ровно 2 файла
+    if len(files) != 2:
+        raise HTTPException(
+            status_code=400, detail="Exactly 2 images are required."
+        )
+
+    # Проверяем, что все файлы являются изображениями
+    for file in files:
+        if not file.content_type.startswith("image/"):
+            raise HTTPException(
+                status_code=400, detail=f"File {file.filename} is not an image."
+            )
+
+    # Создаём список файлов для отправки
+    media = []
+    files_to_send = {}
+    for index, file in enumerate(files):
+        file_data = await file.read()
+        field_name = f"photo{index}"
+        files_to_send[field_name] = (file.filename, file_data, file.content_type)
+        media.append({
+            "type": "photo",
+            "media": f"attach://{field_name}"
+        })
+
+    # Отправляем медиагруппу в Telegram
+    response = requests.post(
+        "https://api.telegram.org/bot8069124241:AAETLV7HAvu5r1nbBcv9z9dfc3SFDI7Ke6w/sendMediaGroup",
+        data={"chat_id": -4795763352, "media": media},
+        files=files_to_send
+    )
+
+    # Проверяем ответ от Telegram
+    if response.status_code != 200:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to send media group: {response.text}",
+        )
+
+    return {"message": "Media group sent to Telegram successfully"}
 
 
 def process_dicom(file_content: bytes):
