@@ -1,5 +1,8 @@
 import base64
+import json
 from pathlib import Path
+from typing import List
+
 import requests
 import numpy as np
 from PIL import ImageDraw, ImageOps, ImageChops
@@ -33,49 +36,55 @@ async def upload_file(file: UploadFile = File(...)):
 
 
 @upload_router.post("/edited-images/")
-async def upload_images(
-    files: List[UploadFile] = File(...),
-):
-    # Проверяем, что прислали ровно 2 файла
-    if len(files) != 2:
-        raise HTTPException(
-            status_code=400, detail="Exactly 2 images are required."
-        )
+async def upload_images(file: UploadFile = File(...), mask: UploadFile = File(...)):
+    # Загружаем изображение
+    image_bytes = await file.read()
+    image = Image.open(io.BytesIO(image_bytes))
 
-    # Проверяем, что все файлы являются изображениями
-    for file in files:
-        if not file.content_type.startswith("image/"):
-            raise HTTPException(
-                status_code=400, detail=f"File {file.filename} is not an image."
-            )
+    # Загружаем маску new
+    mask_bytes = await mask.read()
+    mask_json = json.loads(mask_bytes.decode('utf-8'))
+    mask_array = np.array(mask_json)
+    mask_image = Image.fromarray(mask_array.astype(np.uint8) * 255)
 
-    # Создаём список файлов для отправки
-    media = []
-    files_to_send = {}
-    for index, file in enumerate(files):
-        file_data = await file.read()
-        field_name = f"photo{index}"
-        files_to_send[field_name] = (file.filename, file_data, file.content_type)
-        media.append({
-            "type": "photo",
-            "media": f"attach://{field_name}"
-        })
+    # old
+    alpha_channel = np.array(image)[:, :, 3]
+    mask_array = np.where(alpha_channel == 254, 0, 1)
+    old_mask_image = Image.fromarray(mask_array.astype(np.uint8) * 255)
+    #------------------------------------------------------
+    # 1. Создаем изображение с желтой маской (новое изображение)
+    yellow_color = (255, 255, 0, 100)  # Желтый цвет с прозрачностью 100
+    yellow_mask = Image.new("RGBA", image.size, yellow_color)
+    yellow_mask_image = Image.alpha_composite(image, Image.composite(yellow_mask, image, mask_image))
 
-    # Отправляем медиагруппу в Telegram
+    # 2. Создаем изображение с красной маской с прозрачностью 100 (старое изображение)
+    red_color = (255, 0, 0, 100)  # Красный цвет с прозрачностью 100
+    red_mask = Image.new("RGBA", image.size, red_color)
+    red_mask_image = Image.alpha_composite(image, Image.composite(red_mask, image, old_mask_image))
+    #######################
+    img_byte_array = io.BytesIO()
+    yellow_mask_image.save(img_byte_array, format='PNG')
+    img_byte_array.seek(0)
+
+    mask_byte_array = io.BytesIO()
+    red_mask_image.save(mask_byte_array, format='PNG')
+    mask_byte_array.seek(0)
+
+    # Формируем файлы для отправки
+    files_to_send = {
+        "photo": ("image.png", img_byte_array, "image/png"),
+        "mask": ("mask.png", mask_byte_array, "image/png"),
+    }
+
+    # Отправляем изображения в Telegram
     response = requests.post(
         "https://api.telegram.org/bot8069124241:AAETLV7HAvu5r1nbBcv9z9dfc3SFDI7Ke6w/sendMediaGroup",
-        data={"chat_id": -4795763352, "media": media},
+        data={
+            "chat_id": -4795763352,  # Замените на ваш chat_id
+            "media": '[{"type": "photo", "media": "attach://photo"}, {"type": "photo", "media": "attach://mask"}]'
+        },
         files=files_to_send
     )
-
-    # Проверяем ответ от Telegram
-    if response.status_code != 200:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to send media group: {response.text}",
-        )
-
-    return {"message": "Media group sent to Telegram successfully"}
 
 
 def process_dicom(file_content: bytes):
